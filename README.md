@@ -17,6 +17,8 @@
 [![ReadTheDocs](https://readthedocs.org/projects/pytorch-lightning/badge/?version=latest)](https://pytorch-lightning.readthedocs.io/en/latest)
 [![Gitter](https://badges.gitter.im/PyTorch-Lightning/community.svg)](https://gitter.im/PyTorch-Lightning/community?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge)
 [![license](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://github.com/williamFalcon/pytorch-lightning/blob/master/LICENSE)
+[![Next Release](https://img.shields.io/badge/Next%20Release-Nov%206-<COLOR>.svg)](https://shields.io/)
+
 <!-- 
 removed until codecov badge isn't empy. likely a config error showing nothing on master.
 [![codecov](https://codecov.io/gh/Borda/pytorch-lightning/branch/master/graph/badge.svg)](https://codecov.io/gh/Borda/pytorch-lightning)
@@ -50,9 +52,9 @@ Lightning sets up all the boilerplate state-of-the-art training for you so you c
 - [What lightning automates](https://github.com/williamFalcon/pytorch-lightning#what-does-lightning-control-for-me)    
 - [Tensorboard integration](https://github.com/williamFalcon/pytorch-lightning#tensorboard)    
 - [Lightning features](https://github.com/williamFalcon/pytorch-lightning#lightning-automates-all-of-the-following-each-is-also-configurable)    
-- [Demos](https://github.com/williamFalcon/pytorch-lightning#demo)    
+- [Examples](https://github.com/williamFalcon/pytorch-lightning#examples)    
 - [Tutorials](https://github.com/williamFalcon/pytorch-lightning#tutorials)
-- [Contributing](https://github.com/williamFalcon/pytorch-lightning/blob/master/CONTRIBUTING.md)    
+- [Contributing](https://github.com/williamFalcon/pytorch-lightning/blob/master/.github/CONTRIBUTING.md)
 - [Bleeding edge install](https://github.com/williamFalcon/pytorch-lightning#bleeding-edge)   
 - [Lightning Design Principles](https://github.com/williamFalcon/pytorch-lightning#lightning-design-principles)   
 - [Asking for help](https://github.com/williamFalcon/pytorch-lightning#asking-for-help)
@@ -66,7 +68,9 @@ Think about Lightning as refactoring your research code instead of using a new f
 The LightningModule defines a *system* such as seq-2-seq, GAN, etc... It can ALSO define a simple classifier such as the example below.     
 
 To use lightning do 2 things:  
-1. [Define a LightningModule](https://williamfalcon.github.io/pytorch-lightning/LightningModule/RequiredTrainerInterface/)         
+1. [Define a LightningModule](https://williamfalcon.github.io/pytorch-lightning/LightningModule/RequiredTrainerInterface/)     
+
+**WARNING:** This syntax is for version 0.5.0+ where abbreviations were removed.    
 ```python
 import os
 import torch
@@ -91,7 +95,9 @@ class CoolSystem(pl.LightningModule):
         # REQUIRED
         x, y = batch
         y_hat = self.forward(x)
-        return {'loss': F.cross_entropy(y_hat, y)}
+        loss = F.cross_entropy(y_hat, y)
+        tensorboard_logs = {'train_loss': loss}
+        return {'loss': loss, 'log': tensorboard_logs}
 
     def validation_step(self, batch, batch_nb):
         # OPTIONAL
@@ -102,15 +108,17 @@ class CoolSystem(pl.LightningModule):
     def validation_end(self, outputs):
         # OPTIONAL
         avg_loss = torch.stack([x['val_loss'] for x in outputs]).mean()
-        return {'avg_val_loss': avg_loss}
+        tensorboard_logs = {'val_loss': avg_loss}
+        return {'avg_val_loss': avg_loss, 'log': tensorboard_logs}
 
     def configure_optimizers(self):
         # REQUIRED
         # can return multiple optimizers and learning_rate schedulers
+        # (LBFGS it is automatically supported, no need for closure function)
         return torch.optim.Adam(self.parameters(), lr=0.02)
 
     @pl.data_loader
-    def tng_dataloader(self):
+    def train_dataloader(self):
         # REQUIRED
         return DataLoader(MNIST(os.getcwd(), train=True, download=True, transform=transforms.ToTensor()), batch_size=32)
 
@@ -135,30 +143,27 @@ trainer = Trainer()
 trainer.fit(model)   
 ```     
 
-Or with tensorboard logger and some options turned on such as multi-gpu, etc...
+Trainer sets up a tensorboard logger, early stopping and checkpointing by default (you can modify all of them or
+use something other than tensorboard).   
+
+Here are more advanced examples
 ```python   
-from test_tube import Experiment    
-
-# PyTorch summarywriter with a few bells and whistles    
-exp = Experiment(save_dir=os.getcwd())
-
 # train on cpu using only 10% of the data (for demo purposes)
-# pass in experiment for automatic tensorboard logging.    
-trainer = Trainer(experiment=exp, max_nb_epochs=1, train_percent_check=0.1)
+trainer = Trainer(max_nb_epochs=1, train_percent_check=0.1)
 
 # train on 4 gpus (lightning chooses GPUs for you)
-# trainer = Trainer(experiment=exp, max_nb_epochs=1, gpus=4)  
+# trainer = Trainer(max_nb_epochs=1, gpus=4, distributed_backend='ddp')  
 
 # train on 4 gpus (you choose GPUs)
-# trainer = Trainer(experiment=exp, max_nb_epochs=1, gpus=[0, 1, 3, 7])   
+# trainer = Trainer(max_nb_epochs=1, gpus=[0, 1, 3, 7], distributed_backend='ddp')   
 
 # train on 32 gpus across 4 nodes (make sure to submit appropriate SLURM job)
-# trainer = Trainer(experiment=exp, max_nb_epochs=1, gpus=8, nb_gpu_nodes=4)
+# trainer = Trainer(max_nb_epochs=1, gpus=8, nb_gpu_nodes=4, distributed_backend='ddp')
 
 # train (1 epoch only here for demo)
 trainer.fit(model)
 
-# view tensorflow logs 
+# view tensorboard logs 
 print('View tensorboard logs by running\ntensorboard --logdir %s' % os.getcwd())
 print('and going to http://localhost:6006 on your browser')
 ```    
@@ -173,20 +178,20 @@ trainer.test()
 Everything in gray!    
 You define the blue parts using the LightningModule interface:  
 
-![Ouverview](./docs/source/_static/overview_flat.jpg)
+![Overview](./docs/source/_static/overview_flat.jpg)
 
 ```python
 # what to do in the training loop
-def training_step(self, data_batch, batch_nb):
+def training_step(self, batch, batch_nb):
 
 # what to do in the validation loop
-def validation_step(self, data_batch, batch_nb):
+def validation_step(self, batch, batch_nb):
 
 # how to aggregate validation_step outputs
 def validation_end(self, outputs):
 
 # and your dataloaders
-def tng_dataloader():
+def train_dataloader():
 def val_dataloader():
 def test_dataloader():
 ```
@@ -195,8 +200,8 @@ def test_dataloader():
 
 ```python
 # define what happens for training here
-def training_step(self, data_batch, batch_nb):
-    x, y = data_batch
+def training_step(self, batch, batch_nb):
+    x, y = batch
     
     # define your own forward and loss calculation
     hidden_states = self.encoder(x)
@@ -222,8 +227,8 @@ def training_step(self, data_batch, batch_nb):
 
 ```python
 # define what happens for validation here
-def validation_step(self, data_batch, batch_nb):    
-    x, y = data_batch
+def validation_step(self, batch, batch_nb):    
+    x, y = batch
     
     # or as basic as a CNN classification
     out = self.forward(x)
@@ -248,12 +253,13 @@ def validation_end(self, outputs):
 
     val_loss_mean /= len(outputs)
     val_acc_mean /= len(outputs)
-    tqdm_dic = {'val_loss': val_loss_mean.item(), 'val_acc': val_acc_mean.item()}
-    return tqdm_dic
+    logs = {'val_loss': val_loss_mean.item(), 'val_acc': val_acc_mean.item()}
+    result = {'log': logs}
+    return result
 ```
    
 ## Tensorboard    
-Lightning is fully integrated with tensorboard.   
+Lightning is fully integrated with tensorboard, MLFlow and supports any logging module.   
 
 ![tensorboard-support](./docs/source/_static/tf_loss.png)
 
@@ -261,26 +267,11 @@ Lightning also adds a text column with all the hyperparameters for this experime
 
 ![tensorboard-support](./docs/source/_static/tf_tags.png)
 
-Simply note the path you set for the [Experiment](https://williamfalcon.github.io/test-tube/experiment_tracking/experiment/) from [test_tube](https://github.com/williamFalcon/test-tube)
-```python
-from test_tube import Experiment
-from pytorch_lightning import Trainer
-
-exp = Experiment(save_dir='/some/path')
-trainer = Trainer(experiment=exp)
-...
-```   
-
-And run tensorboard from that dir   
-```bash
-tensorboard --logdir /some/path     
-```    
-
 ## Lightning automates all of the following ([each is also configurable](https://williamfalcon.github.io/pytorch-lightning/Trainer/)):
-
 
 #### Checkpointing    
 
+- [Checkpoint callback](https://williamfalcon.github.io/pytorch-lightning/Trainer/Checkpointing/#model-saving)
 - [Model saving](https://williamfalcon.github.io/pytorch-lightning/Trainer/Checkpointing/#model-saving)
 - [Model loading](https://williamfalcon.github.io/pytorch-lightning/LightningModule/methods/#load-from-metrics) 
 - [Restoring training session](https://williamfalcon.github.io/pytorch-lightning/Trainer/Checkpointing/#restoring-training-session)
@@ -324,6 +315,7 @@ tensorboard --logdir /some/path
 
 - [Accumulate gradients](https://williamfalcon.github.io/pytorch-lightning/Trainer/Training%20Loop/#accumulated-gradients)
 - [Force training for min or max epochs](https://williamfalcon.github.io/pytorch-lightning/Trainer/Training%20Loop/#force-training-for-min-or-max-epochs)
+- [Early stopping callback](https://williamfalcon.github.io/pytorch-lightning/Trainer/Training%20Loop/#early-stopping)
 - [Force disable early stop](https://williamfalcon.github.io/pytorch-lightning/Trainer/Training%20Loop/#force-disable-early-stop)
 - [Gradient Clipping](https://williamfalcon.github.io/pytorch-lightning/Trainer/Training%20Loop/#gradient-clipping)
 - [Hooks](https://williamfalcon.github.io/pytorch-lightning/Trainer/hooks/)
@@ -344,27 +336,11 @@ tensorboard --logdir /some/path
 #### Testing loop  
 - [Run test set](https://williamfalcon.github.io/pytorch-lightning/Trainer/Testing%20loop/)  
 
-## Demo
-```bash
-# install lightning
-pip install pytorch_lightning
-
-# clone lightning for the demo
-git clone https://github.com/williamFalcon/pytorch-lightning.git
-cd pytorch-lightning
-cd examples/new_project_templates/
-
-# all of the following demos use the SAME model to show no modification needs to be made to your code
-
-# train on cpu 
-python single_cpu_template.py
-
-# train on multiple-gpus 
-python single_gpu_node_template.py --gpus "0,1"
-
-# train on 32 gpus on a cluster (run on a SLURM managed cluster)
-python multi_node_cluster_template.py --nb_gpu_nodes 4 --gpus '0,1,2,3,4,5,6,7'
-```
+## Examples   
+- [GAN](https://github.com/williamFalcon/pytorch-lightning/tree/master/examples/domain_templates/gan.py)    
+- [MNIST](https://github.com/williamFalcon/pytorch-lightning/tree/master/examples/basic_examples)      
+- [Other projects using Lightning](https://github.com/williamFalcon/pytorch-lightning/network/dependents?package_id=UGFja2FnZS0zNzE3NDU4OTM%3D)    
+- [Multi-node](https://github.com/williamFalcon/pytorch-lightning/tree/master/examples/multi_node_examples)   
 
 ## Tutorials   
 - [Basic Lightning use](https://towardsdatascience.com/supercharge-your-ai-research-with-pytorch-lightning-337948a99eec)    

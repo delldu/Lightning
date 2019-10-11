@@ -1,7 +1,113 @@
-Lighting offers a few options for logging information about model, gpu usage, etc (via test-tube). It also offers printing options for training monitoring.
+Lighting offers options for logging information about model, gpu usage, etc, via several different logging frameworks. It also offers printing options for training monitoring.
+
+---   
+### default_save_path   
+Lightning sets a default TestTubeLogger and CheckpointCallback for you which log to
+```os.getcwd()``` by default. To modify the logging path you can set:
+```python
+Trainer(default_save_path='/your/path/to/save/checkpoints')
+```
+ 
+If you need more custom behavior (different paths for both, different metrics, etc...)
+from the logger and the checkpointCallback, pass in your own instances as explained below.
 
 
 ---
+### Setting up logging
+
+The trainer inits a default logger for you (TestTubeLogger). All logs will
+go to the current working directory under a folder named ```os.getcwd()/lightning_logs``. 
+
+If you want to modify the default logging behavior even more, pass in a logger
+(which should inherit from `LightningBaseLogger`).   
+
+```{.python}
+my_logger = MyLightningLogger(...)
+trainer = Trainer(logger=my_logger)
+```
+
+The path in this logger will overwrite default_save_path.
+
+Lightning supports several common experiment tracking frameworks out of the box
+
+---
+#### Test tube
+
+Log using [test tube](https://williamfalcon.github.io/test-tube/).
+
+```{.python}
+from pytorch_lightning.logging import TestTubeLogger
+tt_logger = TestTubeLogger(
+    save_dir=".",
+    name="default",
+    debug=False,
+    create_git_tag=False
+)
+trainer = Trainer(logger=tt_logger)
+```
+
+---
+#### MLFlow
+
+Log using [mlflow](https://mlflow.org)
+
+```{.python}
+from pytorch_lightning.logging import MLFlowLogger
+mlf_logger = MLFlowLogger(
+    experiment_name="default",
+    tracking_uri="file:/."
+)
+trainer = Trainer(logger=mlf_logger)
+```
+
+---
+#### Custom logger
+
+You can implement your own logger by writing a class that inherits from
+`LightningLoggerBase`. Use the `rank_zero_only` decorator to make sure that
+only the first process in DDP training logs data.
+
+```{.python}
+from pytorch_lightning.logging import LightningLoggerBase, rank_zero_only
+
+class MyLogger(LightningLoggerBase):
+
+    @rank_zero_only
+    def log_hyperparams(self, params):
+        # params is an argparse.Namespace
+        # your code to record hyperparameters goes here
+        pass
+    
+    @rank_zero_only
+    def log_metrics(self, metrics, step_num):
+        # metrics is a dictionary of metric names and values
+        # your code to record metrics goes here
+        pass
+    
+    def save(self):
+        # Optional. Any code necessary to save logger data goes here
+        pass
+    
+    @rank_zero_only
+    def finalize(self, status):
+        # Optional. Any code that needs to be run after training
+        # finishes goes here
+```
+
+If you write a logger than may be useful to others, please send
+a pull request to add it to Lighting!
+
+---
+#### Using loggers
+You can call the logger anywhere from your LightningModule by doing:
+```python
+self.logger
+
+# add an image if using TestTubeLogger
+self.logger.experiment.add_image(...)
+```
+
+
 #### Display metrics in progress bar 
 ``` {.python}
 # DEFAULT
@@ -13,15 +119,21 @@ trainer = Trainer(show_progress_bar=True)
 Every k batches lightning will make an entry in the metrics log
 ``` {.python}
 # DEFAULT (ie: save a .csv log file every 10 batches)
-trainer = Trainer(add_log_row_interval=10)
+trainer = Trainer(row_log_interval=10)
 ```   
 
 ---
-#### Log metric row every k batches 
+#### Log GPU memory
 Logs GPU memory when metrics are logged.   
 ``` {.python}
 # DEFAULT
-trainer = Trainer(log_gpu_memory=False)
+trainer = Trainer(log_gpu_memory=None)
+
+# log only the min/max utilization
+trainer = Trainer(log_gpu_memory='min_max')
+
+# log all the GPU memory (if on DDP, logs only that node)
+trainer = Trainer(log_gpu_memory='all')
 ```
 
 ---
@@ -38,61 +150,21 @@ trainer = Trainer(process_position=1)
 
 ---
 #### Save a snapshot of all hyperparameters 
-Whenever you call .save() on the test-tube experiment it logs all the hyperparameters in current use.
-Give lightning a test-tube Experiment object to automate this for you.
+Automatically log hyperparameters stored in the `hparams` attribute as an `argparse.Namespace` 
 ``` {.python}
-from test_tube import Experiment
 
-exp = Experiment(...)
-Trainer(experiment=exp)
-```
+class MyModel(pl.Lightning):
+    def __init__(self, hparams):
+        self.hparams = hparams
 
----
-#### Snapshot code for a training run
-Whenever you call .save() on the test-tube experiment it snapshows all code and pushes to a git tag.
-Give lightning a test-tube Experiment object to automate this for you.
-``` {.python}
-from test_tube import Experiment
+    ...
 
-exp = Experiment(create_git_tag=True)
-Trainer(experiment=exp)
-```
+args = parser.parse_args()
+model = MyModel(args)
 
----
-### Tensorboard support   
-In the LightningModule you can access the experiment logger by doing:
-```python
-self.experiment
-
-# add image
-# Look at PyTorch SummaryWriter docs for what you can do.   
-self.experiment.add_image(...)
-```
-
-The experiment object is a strict subclass of PyTorch SummaryWriter. However, this class
-also snapshots every detail about the experiment (data folder paths, code, hyperparams),
-and allows you to visualize it using tensorboard.
-``` {.python}
-from test_tube import Experiment, HyperOptArgumentParser
-
-# exp hyperparams
-args = HyperOptArgumentParser()
-hparams = args.parse_args()
-
-# this is a summaryWriter with nicer logging structure
-exp = Experiment(save_dir='/some/path', create_git_tag=True)
-
-# track experiment details (must be ArgumentParser or HyperOptArgumentParser).
-# each option in the parser is tracked
-exp.argparse(hparams)
-exp.tag({'description': 'running demo'})
-
-# trainer uses the exp object to log exp data
-trainer = Trainer(experiment=exp)
+logger = TestTubeLogger(...)
+t = Trainer(logger=logger)
 trainer.fit(model)
-
-# view logs at:
-# tensorboard --logdir /some/path   
 ```
 
 ---

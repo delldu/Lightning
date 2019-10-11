@@ -19,13 +19,14 @@ class LightningModule(GradInformation, ModelIO, ModelHooks):
         self.global_step = 0
         self.loaded_optimizer_states_dict = {}
         self.trainer = None
-        self.experiment = None
+        self.logger = None
         self.example_input_array = None
 
         # track if gpu was requested for checkpointing
         self.on_gpu = False
         self.use_dp = False
         self.use_ddp = False
+        self.use_ddp2 = False
         self.use_amp = False
 
     def forward(self, *args, **kwargs):
@@ -91,22 +92,26 @@ class LightningModule(GradInformation, ModelIO, ModelHooks):
         """
         raise NotImplementedError
 
-    def optimizer_step(self, epoch_nb, batch_nb, optimizer, optimizer_i):
+    def optimizer_step(self, epoch_nb, batch_nb, optimizer, optimizer_i, second_order_closure=None):
         """
         Do something instead of the standard optimizer behavior
         :param epoch_nb:
         :param batch_nb:
         :param optimizer:
         :param optimizer_i:
+        :param second_order_closure: closure for second order methods
         :return:
         """
-        optimizer.step()
+        if isinstance(optimizer, torch.optim.LBFGS):
+            optimizer.step(second_order_closure)
+        else:
+            optimizer.step()
 
         # clear gradients
         optimizer.zero_grad()
 
     @data_loader
-    def tng_dataloader(self):
+    def train_dataloader(self):
         """
         Implement a PyTorch DataLoader
         :return:
@@ -130,17 +135,16 @@ class LightningModule(GradInformation, ModelIO, ModelHooks):
         return None
 
     @classmethod
-    def load_from_metrics(cls, weights_path, tags_csv, on_gpu):
+    def load_from_metrics(cls, weights_path, tags_csv):
         """
         Primary way of loading model from csv weights path
         :param weights_path:
         :param tags_csv:
-        :param on_gpu:
         :param map_location: dic for mapping storage {'cuda:1':'cuda:0'}
         :return:
         """
         hparams = load_hparams_from_tags_csv(tags_csv)
-        hparams.__setattr__('on_gpu', on_gpu)
+        hparams.__setattr__('on_gpu', False)
 
         # load on CPU only to avoid OOM issues
         # then its up to user to put back on GPUs
@@ -155,8 +159,8 @@ class LightningModule(GradInformation, ModelIO, ModelHooks):
 
         return model
 
-    def summarize(self):
-        model_summary = ModelSummary(self)
+    def summarize(self, mode):
+        model_summary = ModelSummary(self, mode=mode)
         print(model_summary)
 
     def freeze(self):

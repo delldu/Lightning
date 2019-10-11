@@ -109,7 +109,7 @@ class GAN(pl.LightningModule):
             # log sampled images
             sample_imgs = self.generated_imgs[:6]
             grid = torchvision.utils.make_grid(sample_imgs)
-            self.experiment.add_image('generated_images', grid, 0)
+            self.logger.experiment.add_image('generated_images', grid, 0)
 
             # ground truth result (ie: all fake)
             valid = torch.ones(imgs.size(0), 1)
@@ -146,7 +146,7 @@ class GAN(pl.LightningModule):
         return [opt_g, opt_d], []
 
     @pl.data_loader
-    def tng_dataloader(self):
+    def train_dataloader(self):
         transform = transforms.Compose([transforms.ToTensor(),
                                         transforms.Normalize([0.5], [0.5])])
         dataset = MNIST(os.getcwd(), train=True, download=True, transform=transform)

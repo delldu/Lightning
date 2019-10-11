@@ -5,7 +5,7 @@ import pdb
 from subprocess import call
 
 import torch
-
+import torch.distributed as dist
 from pytorch_lightning.pt_overrides.override_data_parallel import (
     LightningDistributedDataParallel, LightningDataParallel)
 
@@ -34,6 +34,11 @@ class TrainerIO(object):
 
         # if script called from hpc resubmit, load weights
         self.restore_hpc_weights_if_needed(model)
+
+        # wait for all models to restore weights
+        if self.use_ddp or self.use_ddp2:
+            # wait for all processes to catch up
+            dist.barrier()
 
     def restore_state_if_checkpoint_exists(self, model):
         # do nothing if there's not dir or callback
@@ -88,7 +93,7 @@ class TrainerIO(object):
         if self.proc_rank == 0:
             # save weights
             print('handling SIGUSR1')
-            self.hpc_save(self.weights_save_path, self.experiment)
+            self.hpc_save(self.weights_save_path, self.logger)
 
             # find job id
             job_id = os.environ['SLURM_JOB_ID']
@@ -105,7 +110,7 @@ class TrainerIO(object):
                 print('requeue failed...')
 
             # close experiment to avoid issues
-            self.experiment.close()
+            self.logger.close()
 
     def term_handler(self, signum, frame):
         # save
@@ -233,12 +238,12 @@ class TrainerIO(object):
     # ----------------------------------
     # PRIVATE OPS
     # ----------------------------------
-    def hpc_save(self, folderpath, experiment):
+    def hpc_save(self, folderpath, logger):
         # make sure the checkpoint folder exists
         os.makedirs(folderpath, exist_ok=True)
 
-        # save exp to make sure we get all the metrics
-        experiment.save()
+        # save logger to make sure we get all the metrics
+        logger.save()
 
         ckpt_number = self.max_ckpt_in_folder(folderpath) + 1
 
